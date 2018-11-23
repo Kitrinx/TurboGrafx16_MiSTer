@@ -133,8 +133,8 @@ assign VIDEO_ARY = status[1] ? 8'd9  : 8'd3;
 parameter CONF_STR1 = {
 	"TGFX16;;",
 	"-;",
-	"FS13,PCEBIN,Load TurboGrafx;",
-	"FS13,SGX,Load SuperGrafx;",
+	"FS,PCEBIN,Load TurboGrafx;",
+	"FS,SGX,Load SuperGrafx;",
 	"-;"
 };
 
@@ -486,6 +486,25 @@ dpram #(12) backram_h
 	.q_b(sd_buff_din[15:8])
 );
 
+reg [23:0] bk_write_counter = 0;
+reg bk_new_write = 0;
+
+// If BRAM is written, automatically backup to disk after a short pause
+always @(posedge clk_sys) begin
+	if ((bk_write_counter > 1) && ~bram_wr) begin
+		bk_write_counter <= bk_write_counter - 1;
+	end else if ((bk_write_counter == 1) && ~bk_new_write ) begin
+		bk_write_counter <= 0;
+		bk_new_write <= 1;
+	end else if(bk_save) begin
+		bk_new_write <= 0;
+	end
+
+	if (bram_wr) begin
+		bk_new_write <= 0;
+		bk_write_counter <= 24'hFFFFFF;
+	end
+end
 
 wire downloading = ioctl_download;
 
@@ -497,11 +516,18 @@ always @(posedge clk_sys) begin
 	if(~old_downloading & downloading) bk_ena <= 0;
 	
 	//Save file always mounted in the end of downloading state.
-	if(downloading && img_mounted && img_size && !img_readonly) bk_ena <= 1;
+	if(downloading && img_mounted && img_size && !img_readonly) begin
+		bk_ena <= 1;
+		bk_new_load <= 1;
+	end else begin
+		bk_new_load <= 0;
+	end
+
 end
 
-wire bk_load    = status[16];
-wire bk_save    = status[7];
+reg bk_new_load = 0;
+wire bk_load    = status[16] | bk_new_load;
+wire bk_save    = status[7] | bk_new_write;
 reg  bk_loading = 0;
 reg  bk_state   = 0;
 
